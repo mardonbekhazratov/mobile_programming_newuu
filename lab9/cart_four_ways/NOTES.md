@@ -122,3 +122,97 @@
    | `BlocListener` | `ref.listen` |
    | `context.read` | `ref.read` |
    | `buildWhen` | `select` (selects a value to compare instead of a predicate) |
+
+## Part 5 - Bloc
+
+- **T2 - transition log** (`TransitionLogger` in `main.dart`), from the demo flow:
+
+  ```
+  CartBloc: CartState(Monitor×3, idle, history: 3) --CartQtyChanged--> CartState(Monitor×4, idle, history: 4)
+  CartBloc: CartState(Monitor×3, idle, history: 5) --CartCouponApplied--> CartState(Monitor×3, SAVE10, idle, history: 6)
+  CartBloc: CartState(Monitor×3, SAVE10, idle, history: 6) --CartCheckoutRequested--> CartState(Monitor×3, SAVE10, submitting, history: 6)
+  CartBloc: CartState(Monitor×3, SAVE10, submitting, history: 6) --CartCheckoutRequested--> CartState(Monitor×3, SAVE10, failure, history: 6)
+  CartBloc: CartState(Monitor×3, SAVE10, failure, history: 6) --CartUndone--> CartState(Monitor×3, failure, history: 5)
+  ```
+
+  Compared with the Cubit's `onChange` (`current -> next` only), every transition also names
+  the **event** that caused it, so each change can be traced to a user action.
+- **T3**: the Part 4 card is now `SelectedSummary<B extends StateStreamable<CartState>>` and
+  is used as `SelectedSummary<CartCubit>` and `SelectedSummary<CartBloc>`. It still rebuilds
+  only when the summary changes.
+- **T4 - triple tap with `droppable()`**: the first `CartCheckoutRequested` runs. The next two
+  arrive while its handler is still running and are dropped, so there is one `submitting`, one
+  API call and one result (the third test checks `submit` is called once). With the Cubit,
+  `checkout()` is a plain method, so each tap starts its own API call: three orders. The 2nd
+  and 3rd `submitting` emits equal the current state and are dropped, so the Cubit log looks
+  clean even though the API was called three times. **`emit.isDone`**: `close()` cancels the
+  handler's emitter, and a cancelled emitter ignores `emit`. `isDone` is also true after the
+  handler has completed (an `emit` then fails an assert). The check makes the case explicit
+  and skips the work.
+- **T5 - undoable events** (the `isUndoable` switch in `CartBloc`): `CartProductAdded`,
+  `CartProductRemoved`, `CartQtyChanged` and `CartCouponApplied` are user edits, so they are
+  undoable. `CartCheckoutRequested` is not: status changes are not edits, and a successful
+  order clears the cart and its history. `CartUndone` is not either, because it pops the
+  history. The switch is exhaustive, so a new event does not compile until this decision is
+  made for it.
+
+1. **When is the event layer worth its boilerplate?** When you need to know or control *which
+   kind* of action is happening: logging and analytics by event, undo decisions, and
+   per-event concurrency (`droppable`, `restartable`, `debounce`). Clearly better here:
+   **checkout**, where one `transformer: droppable()` drops duplicate taps and the log names
+   the event. Pure overhead: **the quantity stepper**, a one-line synchronous change that needs
+   an event class, a handler and `add(...)` for the same result as a Cubit method.
+2. **"Drop duplicate taps" declaratively**: only **Bloc**, with `transformer: droppable()`. In
+   the other three it is an imperative guard at the start of `checkout`,
+   `if (state.status == CheckoutStatus.submitting) return;` (`_state` in setState), or
+   disabling the button while submitting.
+
+## Checkpoint questions
+
+1. **Where state lives / when it dies**
+   - setState: in the page's `State` object, and it dies when the page is popped (or on hot
+     restart).
+   - Riverpod: in the root `ProviderScope`'s `ProviderContainer`, and it lives as long as the
+     app (with `autoDispose`, it dies when the last listener goes away).
+   - Cubit: in the `CartCubit` created by the page's `BlocProvider`, and it is closed when the
+     page is popped.
+   - Bloc: in the `CartBloc` created by the page's `BlocProvider`, and it is closed when the
+     page is popped.
+2. **Single public mutation API**: in Riverpod's `Notifier`, the notifier's methods (only the
+   notifier can assign `state`). In Cubit, the cubit's methods (only the cubit can `emit`). In
+   Bloc, `add(event)`. **setState has none**: the state is a private field of the `State`, and
+   nothing outside can change it.
+3. **Mapping**: `ref.watch` ↔ `BlocBuilder` (`BlocSelector`/`select` ↔ `buildWhen`),
+   `ref.read` ↔ `context.read`, `ref.listen` ↔ `BlocListener`. setState has no separate
+   pieces: the `State` reads its own fields, `setState` rebuilds the whole widget (an
+   unfiltered "watch"), and side effects are called directly after the await (no "listen").
+4. **Why skip when `new == old`?** Nothing changed, so a rebuild or notification would be
+   wasted work (and repeated side effects). For this to work, `CartState` must be
+   **immutable** (every change is a new object made with `copyWith`; a state mutated in place
+   equals itself, so the change would be lost), and it must have **value equality**: override
+   `==` and `hashCode`, comparing `lines` element by element, which needs `==` on `CartLine` too.
+5. **Guard after the await in checkout**
+   - setState: `mounted`. The `State` can be disposed during the await, and `setState`/`context`
+     are then invalid.
+   - Riverpod: nothing. The notifier lives in the container, which outlives the page, and the
+     side effects are in a `ref.listen` that goes away with the page.
+   - Cubit: `isClosed`. The cubit is closed with the page, and `emit` after `close()` throws.
+   - Bloc: `emit.isDone`. The emitter belongs to one handler, and it is done when the bloc
+     closes or the handler completes.
+
+   They differ because the state holder's lifetime is tied to a different thing each time:
+   the widget, the container, the `BlocProvider`, or a single event handler.
+
+## Comparison table
+
+Lines = non-blank lines of the final code in each style's folder (sample + T1-T5). Shared code
+is not counted: model 128, widgets 128, checkout API 13.
+
+| Style | Lines T1-T5 | Test lines | Files (lib + test) | Strength | Weakness |
+|---|---|---|---|---|---|
+| setState | 54 | 16 | 1 + 1 | Fewest concepts: nothing to add, wire or learn | State dies with the page and cannot be shared; can only be tested through widgets |
+| Riverpod | 74 | 32 | 2 + 1 | State lives outside the tree; `select` limits rebuilds; tests need no widgets and dependencies are swapped with overrides | Plain fields like `_history` are invisible to Riverpod, so derived providers must watch the right thing; `read`/`watch` are easy to mix up |
+| Cubit | 79* | 41 | 2 + 1 | Plain methods, and `blocTest` checks the exact sequence of states | No concurrency control (triple tap = three API calls); anything the UI needs must be in the state |
+| Bloc | 109 | 58 | 3 + 1 | Every change is traceable to an event; concurrency is declarative (`droppable`) | Most boilerplate: an event class and a handler for every one-line change |
+
+\* includes `SelectedSummary`, which the Bloc page reuses.

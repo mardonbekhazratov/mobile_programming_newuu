@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'bloc/cart_page_bloc.dart';
@@ -7,7 +8,19 @@ import 'riverpod/cart_page_riverpod.dart';
 import 'setstate/cart_page_setstate.dart';
 
 void main() {
+  Bloc.observer = const TransitionLogger();
   runApp(const ProviderScope(child: MainApp()));
+}
+
+class TransitionLogger extends BlocObserver {
+  const TransitionLogger();
+
+  @override
+  void onTransition(Bloc<dynamic, dynamic> bloc, Transition<dynamic, dynamic> transition) {
+    super.onTransition(bloc, transition);
+    debugPrint('${bloc.runtimeType}: ${transition.currentState} '
+        '--${transition.event.runtimeType}--> ${transition.nextState}');
+  }
 }
 
 class MainApp extends StatelessWidget {

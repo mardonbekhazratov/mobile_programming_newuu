@@ -28,7 +28,7 @@ class CubitCartPage extends StatelessWidget {
                   onQtyChanged: cart.changeQty,
                   couponError: s.couponError,
                   onApplyCoupon: cart.applyCoupon,
-                  summary: const _Summary(),
+                  summary: const SelectedSummary<CartCubit>(),
                   submitting: s.status == CheckoutStatus.submitting,
                   onCheckout: cart.checkout,
                 ),
@@ -39,12 +39,12 @@ class CubitCartPage extends StatelessWidget {
       );
 }
 
-/// Rebuilds only when one of the summary values changes.
-class _Summary extends StatelessWidget {
-  const _Summary();
+/// Summary card for any Cubit/Bloc of [CartState]; rebuilds only when a summary value changes.
+class SelectedSummary<B extends StateStreamable<CartState>> extends StatelessWidget {
+  const SelectedSummary({super.key});
 
   @override
-  Widget build(BuildContext context) => BlocSelector<CartCubit, CartState, CartSummary>(
+  Widget build(BuildContext context) => BlocSelector<B, CartState, CartSummary>(
         selector: (s) => s.summary,
         builder: (_, summary) => SummaryCard(summary),
       );
