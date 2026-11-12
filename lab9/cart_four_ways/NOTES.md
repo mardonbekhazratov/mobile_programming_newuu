@@ -33,3 +33,54 @@
 2. **Where does `_history` live?** In the page's `State` object, next to `_state`. Hot reload
    keeps `State` objects, so the history survives. Hot restart creates the app again, so the
    history (and the cart) is lost. Popping the page also loses it.
+
+## Part 3 - Riverpod
+
+- **T2 - does `state = state.copyWith(coupon: code)` notify when the code is the same?**
+  Without `==`, yes: `copyWith` always returns a new object and the default `==` is identity.
+  Riverpod 3 compares the old and new state with `==`. Checked with a listener while applying
+  `SAVE10` twice: **2** notifications without `==`/`hashCode` on `CartState`, **1** with them.
+- **T3**: log from a widget test (tap Keyboard, apply an invalid coupon, tap +):
+
+  ```
+  setState                                    Riverpod
+  SummaryCard build: total 0.00               SummaryCard build: total 0.00
+  -- tap Keyboard                             -- tap Keyboard
+  SummaryCard build: total 49.00              SummaryCard build: total 49.00
+  -- type and apply invalid coupon            -- type and apply invalid coupon
+  SummaryCard build: total 49.00              (no rebuild)
+  -- + on Keyboard                            -- + on Keyboard
+  SummaryCard build: total 98.00              SummaryCard build: total 98.00
+  ```
+
+  Typing alone rebuilds neither version, because the text lives in the `TextEditingController`,
+  not in the cart state. The summary selects `s.summary`, a record of
+  `(items, subtotal, discount, total)`. Records compare by value, so the card rebuilds only when
+  one of the values it shows changes, and it does not need a `ref.read` in `build`.
+- **T4 - why no `mounted` check?** The notifier lives in the `ProviderContainer`, not in the
+  page, and `cartProvider` is not `autoDispose`. It is still alive after the await even if the
+  page was popped. The SnackBar/banner is shown from the page's `ref.listen`, which is removed
+  when the page unmounts, so no dead `context` is used. (With `autoDispose` the notifier could
+  be disposed during the await, and Riverpod 3 would need `if (!ref.mounted) return;`.)
+- **T5**: `canUndoProvider` must `watch(cartProvider)`. `_history` is a plain field that
+  Riverpod cannot see, but it only changes together with the cart state, so recomputing on
+  every cart change is enough. With `cartProvider.autoDispose`, popping the page removes the
+  last listener and the provider is disposed. The notifier, with its `_history`, is thrown away,
+  and coming back creates a new notifier with an empty cart and no history. I kept it
+  non-`autoDispose` (needed for the T4 answer above).
+
+1. **`ref.read` vs `ref.watch`**
+   - `ref.read(cartProvider.notifier)` in the page's `build`: only method handles are needed,
+     and they never change.
+   - `ref.read(checkoutApiProvider)` in `checkout()`: a one-time lookup inside a method.
+   - `ref.read(cartProvider)` in the `ref.listen` callback: the current value inside a
+     callback, with no subscription.
+   - `ref.watch(cartProvider)` in the page: it displays lines, coupon error and status, so it
+     must rebuild.
+   - `ref.watch(cartProvider.select((s) => s.summary))` in `_Summary`: it displays the summary,
+     so it rebuilds only when the summary changes.
+   - (Also: the page watches `canUndoProvider`, which watches `cartProvider`.)
+2. **Why does the summary rebuild less often than in setState?** With setState every change
+   rebuilds the whole page and creates a new `SummaryCard`. In Riverpod `_Summary` is a `const`
+   widget with its own `select` subscription. When the page rebuilds, Flutter reuses the same
+   const instance and skips it, and the `select` only fires when the summary values change.

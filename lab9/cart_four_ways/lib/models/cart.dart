@@ -17,6 +17,11 @@ class CartLine {
   final int qty;
   double get subtotal => product.price * qty;
   CartLine copyWith({int? qty}) => CartLine(product: product, qty: qty ?? this.qty);
+
+  @override
+  bool operator ==(Object other) => other is CartLine && other.product.id == product.id && other.qty == qty;
+  @override
+  int get hashCode => Object.hash(product.id, qty);
 }
 
 /// Pure, style-independent cart logic. Every state holder calls these.
@@ -98,4 +103,34 @@ class CartState {
   /// (so undo never brings back a stale "submitting" spinner).
   CartState restore(CartState previous) =>
       copyWith(lines: previous.lines, coupon: previous.coupon, couponError: previous.couponError);
+
+  @override
+  bool operator ==(Object other) =>
+      other is CartState &&
+      _listEquals(other.lines, lines) &&
+      other.coupon == coupon &&
+      other.couponError == couponError &&
+      other.status == status &&
+      other.orderId == orderId &&
+      other.checkoutError == checkoutError;
+
+  @override
+  int get hashCode => Object.hash(Object.hashAll(lines), coupon, couponError, status, orderId, checkoutError);
+
+  @override
+  String toString() => 'CartState(${[
+        for (final l in lines) '${l.product.name}×${l.qty}',
+        ?coupon,
+        if (couponError != null) '"$couponError"',
+        status.name,
+      ].join(', ')})';
+}
+
+bool _listEquals<T>(List<T> a, List<T> b) {
+  if (identical(a, b)) return true;
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+  return true;
 }
