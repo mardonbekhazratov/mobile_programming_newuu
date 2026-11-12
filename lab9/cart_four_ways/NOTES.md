@@ -84,3 +84,41 @@
    rebuilds the whole page and creates a new `SummaryCard`. In Riverpod `_Summary` is a `const`
    widget with its own `select` subscription. When the page rebuilds, Flutter reuses the same
    const instance and skips it, and the `select` only fires when the summary values change.
+
+## Part 4 - Cubit
+
+- **T2**: I kept the hand-written `==` from Part 3 instead of adding Equatable. `onChange`
+  log while applying `SAVE10` twice. The second emit is dropped and `onChange` is not called:
+
+  ```
+  -- SAVE10
+  CartCubit CartState(idle) -> CartState(SAVE10, idle, history: 1)
+  -- SAVE10 again
+  -- add Keyboard
+  CartCubit CartState(SAVE10, idle, history: 1) -> CartState(Keyboard×1, SAVE10, idle, history: 2)
+  ```
+
+- **T4 - `emit` after `close()`**: it throws
+  `Bad state: Cannot emit new states after calling close`. Popping the page mid-checkout
+  closes the cubit (`BlocProvider` disposes it), so after the await `checkout()` checks
+  `if (isClosed) return;`.
+- **T5**: a `bool get canUndo` on the cubit is not part of the state, so `BlocBuilder` never
+  hears about it changing. Fix: the history is now a field of `CartState` (`canUndo` is a
+  getter on it), and `push`/`pop` are pure helpers in the model. `history` is left out of
+  `==`, so an emit that changes nothing is dropped together with its history entry.
+- **T6**: the Riverpod test only checks the final state. `blocTest` checks the exact list of
+  emitted states, so an extra emit, a missing emit or a wrong order also fails the test.
+
+1. **What would break if `BlocProvider` were inside `CartBody`?** A provider is only visible to
+   widgets below it. The page's `BlocBuilder`, `BlocListener` and `context.read` are above
+   `CartBody`, so they would throw `ProviderNotFoundException`. `CartBody` would also stop being
+   dumb shared UI: the setState and Riverpod pages would create a cubit they never use.
+2. **Riverpod equivalents**
+
+   | flutter_bloc | Riverpod |
+   |---|---|
+   | `BlocProvider` | the provider declaration + `ProviderScope` (a nested scope/override to limit it, `autoDispose` for lifetime) |
+   | `BlocBuilder` | `ref.watch` in a `ConsumerWidget` / `Consumer` |
+   | `BlocListener` | `ref.listen` |
+   | `context.read` | `ref.read` |
+   | `buildWhen` | `select` (selects a value to compare instead of a predicate) |

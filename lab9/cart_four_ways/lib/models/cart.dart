@@ -62,6 +62,7 @@ class CartState {
     this.status = CheckoutStatus.idle,
     this.orderId,
     this.checkoutError,
+    this.history = const [],
   });
 
   final List<CartLine> lines;
@@ -70,6 +71,11 @@ class CartState {
   final CheckoutStatus status;
   final String? orderId;
   final String? checkoutError;
+
+  /// Undo history, used by the Cubit and the Bloc. It is bookkeeping, so it is not part of
+  /// `==`: an emit that changes nothing else is dropped together with its history entry.
+  final List<CartState> history;
+  bool get canUndo => history.isNotEmpty;
 
   // Derived values: always computed, never stored.
   int get itemCount => lines.itemCount;
@@ -85,6 +91,7 @@ class CartState {
     CheckoutStatus? status,
     Object? orderId = _keep,
     Object? checkoutError = _keep,
+    List<CartState>? history,
   }) =>
       CartState(
         lines: lines ?? this.lines,
@@ -93,6 +100,7 @@ class CartState {
         status: status ?? this.status,
         orderId: orderId == _keep ? this.orderId : orderId as String?,
         checkoutError: checkoutError == _keep ? this.checkoutError : checkoutError as String?,
+        history: history ?? this.history,
       );
 
   CartState applyCoupon(String code) => code.trim() == 'SAVE10'
@@ -103,6 +111,12 @@ class CartState {
   /// (so undo never brings back a stale "submitting" spinner).
   CartState restore(CartState previous) =>
       copyWith(lines: previous.lines, coupon: previous.coupon, couponError: previous.couponError);
+
+  /// [next], with this state pushed onto the undo history.
+  CartState push(CartState next) => next.copyWith(history: [...history, copyWith(history: const [])]);
+
+  /// Back to the last history entry.
+  CartState pop() => restore(history.last).copyWith(history: history.sublist(0, history.length - 1));
 
   @override
   bool operator ==(Object other) =>
@@ -123,6 +137,7 @@ class CartState {
         ?coupon,
         if (couponError != null) '"$couponError"',
         status.name,
+        if (history.isNotEmpty) 'history: ${history.length}',
       ].join(', ')})';
 }
 
